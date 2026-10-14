@@ -1,0 +1,109 @@
+hydra:
+  run:
+    dir: logs/multimodal-fusion/${now:%Y-%m-%d}_${now:%H-%M-%S}
+  job_logging:
+    handlers:
+      file:
+        filename: ${hydra.runtime.output_dir}/train.log
+
+task_name: multimodal-fusion
+tags: ["multimodal-fusion"]
+train: true
+test: true
+ckpt_path: null
+seed: 1234
+
+data:
+  _target_: data.datamodule.EmbeddingDataModule
+  ps_data_path: ???
+  cp_data_path: ???
+  seed: 42
+  val_fraction: 0.2
+  batch_size: 2048
+  num_workers: 11
+  pin_memory: true
+  num_pairs: 4
+  ps_pair_key: perturb_gene_level
+  cp_pair_key: gene
+  ps_cols: all
+  cp_cols: all
+
+model:
+  _target_: models.model.UnionSupConModel
+  ps_input_dim: 1024
+  cp_input_dim: 1024
+  encoder_hidden_dims: [512]
+  encoder_latent_dim: 512
+  encoder_dropout: 0.0
+  encoder_batch_norm: true
+  encoder_pre_norm: true
+  double_enc1: true
+  fusion_hidden_dims: [1024]
+  fusion_output_dim: 1024
+  fusion_dropout: 0.0
+  fusion_batch_norm: false
+  ps_pos_quantile: 0.99
+  cp_pos_quantile: 0.99
+  modality_dropout_p: 0.5
+  normalize_encoder_output: true
+  tau: 0.1
+  temp: 1.0e-4
+  degree_power: 1.0
+  synergy_weight: 1.0
+  lr: 1.0e-4
+  weight_decay: 1.0e-8
+
+trainer:
+  _target_: lightning.pytorch.trainer.Trainer
+  default_root_dir: ${hydra:runtime.output_dir}
+  accelerator: gpu
+  devices: 1
+  num_nodes: 1
+  strategy:
+    _target_: lightning.pytorch.strategies.DDPStrategy
+    static_graph: true
+    find_unused_parameters: false
+    process_group_backend: nccl
+    gradient_as_bucket_view: true
+  sync_batchnorm: false
+  precision: "32"
+  min_epochs: 1
+  max_epochs: 1000
+  num_sanity_val_steps: 0
+  log_every_n_steps: 50
+  check_val_every_n_epoch: 1
+  val_check_interval: 1.0
+  deterministic: false
+
+callbacks:
+  checkpoint:
+    _target_: lightning.pytorch.callbacks.ModelCheckpoint
+    dirpath: ${hydra:runtime.output_dir}/checkpoints
+    filename: "epoch_{epoch:03d}-{val_loss:.3f}"
+    monitor: val_loss
+    mode: min
+    save_last: true
+    save_top_k: 5
+    auto_insert_metric_name: false
+    every_n_epochs: 1
+  summary:
+    _target_: lightning.pytorch.callbacks.RichModelSummary
+    max_depth: -1
+  progress_bar:
+    _target_: lightning.pytorch.callbacks.TQDMProgressBar
+    refresh_rate: 75
+  ema:
+    _target_: utils.ema_callback.ManualEMACallback
+    decay: 0.999
+
+logger:
+  wandb:
+    _target_: lightning.pytorch.loggers.WandbLogger
+    project: ???
+    name: multimodal-fusion_${now:%Y-%m-%d_%H-%M-%S}
+    save_dir: ${hydra:runtime.output_dir}
+    entity: ???
+    group: ???
+    tags: ${tags}
+    log_model: false
+    save_code: false
